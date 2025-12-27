@@ -1,0 +1,58 @@
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+build/
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tomcat
+server/apache-tomcat-*/logs/*
+server/apache-tomcat-*/temp/*
+server/apache-tomcat-*/work/*
+server/apache-tomcat-*/webapps/docs/
+server/apache-tomcat-*/webapps/examples/
+server/apache-tomcat-*/webapps/host-manager/
+server/apache-tomcat-*/webapps/manager/
+server/apache-tomcat-*/webapps/ROOT/
+server/apache-tomcat-*/webapps/*.war
+
+# Database credentials (if sensitive)
+# src/main/java/com/example/db/DatabaseConnection.java
+
+# Build artifacts
+*.war
+*.jar
+*.class
