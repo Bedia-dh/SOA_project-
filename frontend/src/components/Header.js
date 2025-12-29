@@ -5,7 +5,7 @@ function Header({ status }) {
     <header className="hero">
       <div>
         <p className="eyebrow">Projet SOA</p>
-        <h1>Manage people with React + JAX-RS + JDBC</h1>
+        <h1>Manage people with React + JAX-RS + JPA Hibernate</h1>
         <p className="lede">Fetch, create, update, and delete persons served by the Jersey API.</p>
       </div>
       <div className={`status ${status.isError ? 'error' : ''}`}>

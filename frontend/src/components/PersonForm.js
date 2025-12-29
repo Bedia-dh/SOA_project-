@@ -21,9 +21,11 @@ function PersonForm({ editingPerson, onAdd, onUpdate, onCancel }) {
   const validate = () => {
     const newErrors = {};
     
-    const id = Number(formData.id);
-    if (!Number.isInteger(id) || id < 1) {
-      newErrors.id = 'ID must be a positive integer';
+    if (editingPerson) {
+      const id = Number(formData.id);
+      if (!Number.isInteger(id) || id < 1) {
+        newErrors.id = 'ID must be a positive integer';
+      }
     }
     
     if (!formData.name || formData.name.trim().length < 2) {
@@ -46,17 +48,17 @@ function PersonForm({ editingPerson, onAdd, onUpdate, onCancel }) {
       return;
     }
 
-    const person = {
-      id: Number(formData.id),
+    const payload = {
       name: formData.name.trim(),
       age: Number(formData.age)
     };
 
     let success;
     if (editingPerson) {
-      success = await onUpdate(editingPerson.id, person);
+      payload.id = editingPerson.id;
+      success = await onUpdate(editingPerson.id, payload);
     } else {
-      success = await onAdd(person);
+      success = await onAdd(payload);
     }
 
     if (success) {
@@ -98,19 +100,22 @@ function PersonForm({ editingPerson, onAdd, onUpdate, onCancel }) {
         </button>
       </div>
       <form className="form" onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="id">ID</label>
-          <input
-            type="number"
-            id="id"
-            name="id"
-            value={formData.id}
-            onChange={handleChange}
-            required
-            min="1"
-          />
-          {errors.id && <span style={{ color: '#fecdd3', fontSize: '12px' }}>{errors.id}</span>}
-        </div>
+        {editingPerson && (
+          <div className="field">
+            <label htmlFor="id">ID</label>
+            <input
+              type="number"
+              id="id"
+              name="id"
+              value={formData.id}
+              onChange={handleChange}
+              required
+              min="1"
+              disabled
+            />
+            {errors.id && <span style={{ color: '#fecdd3', fontSize: '12px' }}>{errors.id}</span>}
+          </div>
+        )}
         <div className="field">
           <label htmlFor="name">Name</label>
           <input

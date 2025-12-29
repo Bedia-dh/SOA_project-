@@ -1,4 +1,4 @@
-const API_BASE = '/api/persons';
+const API_BASE = 'api/persons';
 
 export const personService = {
   async getAll() {

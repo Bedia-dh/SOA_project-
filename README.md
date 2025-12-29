@@ -1,21 +1,21 @@
 # Projet SOA - Gestion des Personnes
 
-Application web complète pour la gestion CRUD de personnes, développée avec **React**, **JAX-RS (Jersey)**, **JDBC** et **MySQL**.
+Application web complète pour la gestion CRUD de personnes, développée avec **React**, **JAX-RS (Jersey)**, **JPA/Hibernate** et **MySQL**.
 
-## 📋 Table des Matières
+##  Table des Matières
 
 1. [Architecture du Projet](#architecture-du-projet)
 2. [Technologies Utilisées](#technologies-utilisées)
-3. [Backend - JAX-RS avec JDBC](#backend---jax-rs-avec-jdbc)
+3. [Backend - JAX-RS + JPA/Hibernate](#backend---jax-rs--jpa-hibernate)
 4. [Frontend - React](#frontend---react)
 5. [Communication Frontend-Backend](#communication-frontend-backend)
 6. [Installation et Configuration](#installation-et-configuration)
-7. [Utilisation](#utilisation)
+7. [Utilisation](#utilisation)  
 8. [Structure des Dossiers](#structure-des-dossiers)
 
 ---
 
-## 🏗️ Architecture du Projet
+##  Architecture du Projet
 
 Le projet suit une architecture **client-serveur** séparant clairement le frontend et le backend :
 
@@ -43,18 +43,15 @@ Le projet suit une architecture **client-serveur** séparant clairement le front
 │  │  ┌──────────────────────────────────────────────────┐  │  │
 │  │  │    PersonResource.java (REST Endpoints)          │  │  │
 │  │  │    @Path("/api/persons")                         │  │  │
-│  │  │    - GET    /api/persons                         │  │  │
-│  │  │    - GET    /api/persons/{id}                    │  │  │
-│  │  │    - GET    /api/persons/search?name=...         │  │  │
-│  │  │    - POST   /api/persons                         │  │  │
-│  │  │    - PUT    /api/persons/{id}                    │  │  │
-│  │  │    - DELETE /api/persons/{id}                    │  │  │
+│  │  │    - GET/POST/PUT/DELETE via EntityManager       │  │  │
+│  │  │    - Transactions locales avec JPA               │  │  │
 │  │  └──────────────────────────────────────────────────┘  │  │
 │  │                         ↕                                │  │
 │  │  ┌──────────────────────────────────────────────────┐  │  │
-│  │  │    DatabaseConnection.java (JDBC)                │  │  │
-│  │  │    - Gestion des connexions MySQL                │  │  │
-│  │  │    - Exécution des requêtes SQL                  │  │  │
+│  │  │    Couche JPA/Hibernate                          │  │  │
+│  │  │    - Person.java (@Entity, @NamedQuery)          │  │  │
+│  │  │    - JPAUtil (EntityManagerFactory)              │  │  │
+│  │  │    - persistence.xml (personPU)                  │  │  │
 │  │  └──────────────────────────────────────────────────┘  │  │
 │  └────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
@@ -74,7 +71,7 @@ Le projet suit une architecture **client-serveur** séparant clairement le front
 ### Backend
 - **Java 8** - Langage de programmation
 - **JAX-RS (Jersey 2.35)** - API REST standard Java
-- **JDBC (MySQL Connector 8.0.33)** - Connexion à la base de données
+- **JPA 2.2 + Hibernate 5.6** - Mapping objet-relationnel et transactions
 - **Servlet API 3.1** - Conteneur web
 - **Apache Tomcat 9.0.86** - Serveur d'applications
 - **Maven 3.9.6** - Gestion de dépendances et build
@@ -90,135 +87,133 @@ Le projet suit une architecture **client-serveur** séparant clairement le front
 
 ---
 
-## 🔧 Backend - JAX-RS avec JDBC
+## 🔧 Backend - JAX-RS + JPA/Hibernate
 
 ### Architecture Backend
 
-Le backend utilise **JAX-RS** (Java API for RESTful Web Services) avec l'implémentation **Jersey** pour exposer des services REST.
+Le backend reste basé sur **JAX-RS/Jersey**, mais la persistance est désormais gérée par **JPA 2.2** avec **Hibernate 5.6**. Cette couche apporte :
+
+- Un mapping objet-relationnel grâce aux annotations standard (@Entity, @NamedQuery, etc.).
+- Une gestion transactionnelle plus sûre (`EntityTransaction`).
+- L'accès à la base via l'`EntityManager` plutôt que du SQL manuel.
 
 #### 1. **RestApplication.java** - Point d'entrée JAX-RS
 
 ```java
 @ApplicationPath("/api")
-public class RestApplication extends Application {
-}
+public class RestApplication extends Application { }
 ```
 
-- `@ApplicationPath("/api")` : Définit le chemin de base pour tous les endpoints REST
-- Toutes les ressources seront accessibles sous `/api/*`
+- Définit le préfixe `/api` commun à tous les endpoints.
+- Jersey découvre automatiquement les ressources dans le package.
 
-#### 2. **PersonResource.java** - Contrôleur REST
+#### 2. **PersonResource.java** - Contrôleur REST propulsé par JPA
 
-Le contrôleur expose 6 endpoints REST :
-
-##### **a) GET /api/persons - Récupérer toutes les personnes**
+Chaque endpoint ouvre un `EntityManager` via `JPAUtil`, exécute l'opération JPA équivalente, puis ferme proprement les ressources. Exemple pour la lecture :
 
 ```java
 @GET
-@Produces(MediaType.APPLICATION_JSON)
 public List<Person> getAllPersons() {
-    String sql = "SELECT id, name, age FROM persons";
-    // Exécution de la requête SQL via JDBC
-    // Conversion des ResultSet en objets Person
-    // Retour automatique en JSON par Jersey
+  EntityManager em = JPAUtil.getEntityManager();
+  try {
+    return em.createNamedQuery("Person.findAll", Person.class).getResultList();
+  } finally {
+    em.close();
+  }
 }
 ```
 
-##### **b) GET /api/persons/{id} - Récupérer une personne par ID**
-
-```java
-@GET
-@Path("/{id}")
-public Response getPersonById(@PathParam("id") int id) {
-    String sql = "SELECT id, name, age FROM persons WHERE id = ?";
-    // PreparedStatement pour éviter les injections SQL
-    // Retourne 200 OK avec la personne ou 404 NOT_FOUND
-}
-```
-
-##### **c) GET /api/persons/search?name=X - Rechercher par nom**
-
-```java
-@GET
-@Path("/search")
-public List<Person> getPersonByName(@QueryParam("name") String name) {
-    String sql = "SELECT id, name, age FROM persons WHERE name LIKE ?";
-    // Recherche avec LIKE pour correspondance partielle
-    // Retourne une liste (peut être vide)
-}
-```
-
-##### **d) POST /api/persons - Créer une personne**
+Création avec transaction locale :
 
 ```java
 @POST
-@Consumes(MediaType.APPLICATION_JSON)
 public Response addPerson(Person person) {
-    String sql = "INSERT INTO persons (name, age) VALUES (?, ?)";
-    // Insertion avec auto-génération de l'ID
-    // Retourne 201 CREATED avec la personne créée
+  EntityManager em = JPAUtil.getEntityManager();
+  EntityTransaction tx = em.getTransaction();
+  try {
+    tx.begin();
+    em.persist(person); // Hibernate auto-génère l'ID
+    tx.commit();
+    return Response.status(Response.Status.CREATED).entity(person).build();
+  } catch (Exception e) {
+    if (tx.isActive()) tx.rollback();
+    throw new WebApplicationException("Persistence error: " + e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
+  } finally {
+    em.close();
+  }
 }
 ```
 
-##### **e) PUT /api/persons/{id} - Mettre à jour une personne**
+Le même schéma s'applique aux mises à jour (`em.find`, puis modification de l'entité gérée) et aux suppressions (`em.remove`). Les transactions locales garantissent la cohérence même en cas d'exception.
+
+#### 3. **Person.java** - Entité JPA
 
 ```java
-@PUT
-@Path("/{id}")
-public Response updatePerson(@PathParam("id") int id, Person person) {
-    String sql = "UPDATE persons SET name = ?, age = ? WHERE id = ?";
-    // Mise à jour conditionnelle
-    // Retourne 200 OK ou 404 si ID inexistant
-}
-```
-
-##### **f) DELETE /api/persons/{id} - Supprimer une personne**
-
-```java
-@DELETE
-@Path("/{id}")
-public Response deletePerson(@PathParam("id") int id) {
-    String sql = "DELETE FROM persons WHERE id = ?";
-    // Suppression sécurisée avec PreparedStatement
-    // Retourne 204 NO_CONTENT ou 404
-}
-```
-
-#### 3. **DatabaseConnection.java** - Gestion JDBC
-
-```java
-public class DatabaseConnection {
-    private static final String URL = "jdbc:mysql://localhost:3306/person_db";
-    private static final String USER = "root";
-    private static final String PASSWORD = "1234";
-    
-    public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(URL, USER, PASSWORD);
-    }
-}
-```
-
-**Rôle :**
-- Centralise la configuration de connexion MySQL
-- Fournit des connexions à la demande (pattern Factory)
-- Les connexions sont fermées avec `try-with-resources` pour éviter les fuites
-
-#### 4. **Person.java** - Modèle de données
-
-```java
+@Entity
+@Table(name = "persons")
+@NamedQueries({
+  @NamedQuery(name = "Person.findAll", query = "SELECT p FROM Person p ORDER BY p.id"),
+  @NamedQuery(name = "Person.searchByName", query = "SELECT p FROM Person p WHERE LOWER(p.name) LIKE LOWER(CONCAT('%', :name, '%'))")
+})
 public class Person {
-    private int id;
-    private String name;
-    private int age;
-    
-    // Constructeurs, getters, setters
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Integer id;
+
+  @Column(nullable = false, length = 100)
+  private String name;
+
+  @Column(nullable = false)
+  private Integer age;
+
+  // Getters/Setters classiques
 }
 ```
 
-- POJO (Plain Old Java Object) sans annotations JPA
-- Jersey le sérialise/désérialise automatiquement en JSON via JSON-B
+- Les `@NamedQuery` réutilisables simplifient les lectures.
+- `GenerationType.IDENTITY` délègue la génération de l'ID à MySQL.
 
-#### 5. **CORSFilter.java** - Gestion CORS
+#### 4. **persistence.xml** - Configuration de l'unité de persistance
+
+```xml
+<persistence-unit name="personPU" transaction-type="RESOURCE_LOCAL">
+  <provider>org.hibernate.jpa.HibernatePersistenceProvider</provider>
+  <class>com.example.model.Person</class>
+  <properties>
+    <property name="javax.persistence.jdbc.driver" value="com.mysql.cj.jdbc.Driver"/>
+    <property name="javax.persistence.jdbc.url" value="jdbc:mysql://localhost:3306/person_db"/>
+    <property name="javax.persistence.jdbc.user" value="root"/>
+    <property name="javax.persistence.jdbc.password" value="1234"/>
+    <property name="hibernate.dialect" value="org.hibernate.dialect.MySQL8Dialect"/>
+    <property name="hibernate.hbm2ddl.auto" value="update"/>
+    <property name="hibernate.show_sql" value="true"/>
+  </properties>
+</persistence-unit>
+```
+
+- `RESOURCE_LOCAL` : transactions gérées par l'application (sans JTA).
+- `hibernate.hbm2ddl.auto=update` synchronise le schéma à chaque lancement (pratique en dev).
+
+#### 5. **JPAUtil.java** - Fabrique d'EntityManager
+
+```java
+public final class JPAUtil {
+  private static final EntityManagerFactory EMF = Persistence.createEntityManagerFactory("personPU");
+
+  public static EntityManager getEntityManager() {
+    return EMF.createEntityManager();
+  }
+
+  public static void close() {
+    if (EMF.isOpen()) EMF.close();
+  }
+}
+```
+
+- Centralise l'`EntityManagerFactory` (initialisation coûteuse) et fournit des `EntityManager` prêts à l'emploi.
+- `PersonResource` ferme l'usine via `@PreDestroy` pour éviter les fuites lors de l'arrêt de l'application.
+
+#### 6. **CORSFilter.java** - Gestion CORS
 
 ```java
 @Provider
@@ -350,41 +345,64 @@ function PersonForm({ editingPerson, onAdd, onUpdate, onCancel }) {
   const [formData, setFormData] = useState({ id: '', name: '', age: '' });
   const [errors, setErrors] = useState({});
 
+  useEffect(() => {
+    if (editingPerson) {
+      setFormData({ id: editingPerson.id, name: editingPerson.name, age: editingPerson.age });
+    }
+  }, [editingPerson]);
+
   const validate = () => {
     const newErrors = {};
-    if (!Number.isInteger(Number(formData.id)) || formData.id < 1) {
-      newErrors.id = 'ID must be a positive integer';
-    }
-    if (formData.name.trim().length < 2) {
-      newErrors.name = 'Name must have at least 2 characters';
-    }
-    // ...
+    if (formData.name.trim().length < 2) newErrors.name = 'Name must have at least 2 characters';
+    if (!Number.isInteger(Number(formData.age)) || formData.age < 0) newErrors.age = 'Age must be a non-negative integer';
+    setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
-    
-    const person = {
-      id: Number(formData.id),
+
+    const payload = {
       name: formData.name.trim(),
       age: Number(formData.age)
     };
 
-    if (editingPerson) {
-      await onUpdate(editingPerson.id, person);
-    } else {
-      await onAdd(person);
-    }
+    const success = editingPerson
+      ? await onUpdate(editingPerson.id, payload)
+      : await onAdd(payload);
+
+    if (success) handleReset();
   };
+
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (errors[e.target.name]) setErrors({ ...errors, [e.target.name]: undefined });
+  };
+
+  const handleReset = () => {
+    setFormData({ id: '', name: '', age: '' });
+    setErrors({});
+    if (editingPerson) onCancel();
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {editingPerson && (
+        <input type="number" name="id" value={formData.id} disabled />
+      )}
+      <input type="text" name="name" value={formData.name} onChange={handleChange} />
+      <input type="number" name="age" value={formData.age} onChange={handleChange} />
+      <button type="submit">{editingPerson ? 'Update' : 'Save'}</button>
+    </form>
+  );
 }
 ```
 
 **Validation côté client :**
-- ID : Entier positif
 - Name : Minimum 2 caractères
 - Age : Entier non négatif
+- L'ID est verrouillé et uniquement affiché lors d'une édition
 
 #### 5. **SearchBar.js** - Recherche intelligente
 
@@ -425,9 +443,9 @@ function SearchBar({ onSearch, onClear }) {
    ↓
 5. personService.js envoie une requête HTTP POST
    
-   POST /api/persons
-   Content-Type: application/json
-   Body: {"id":3,"name":"John","age":30}
+  POST /api/persons
+  Content-Type: application/json
+  Body: {"name":"John","age":30}
    
    ↓
 6. Tomcat reçoit la requête et la route vers Jersey
@@ -436,19 +454,16 @@ function SearchBar({ onSearch, onClear }) {
    ↓
 8. @POST addPerson(Person person) est appelé dans PersonResource.java
    ↓
-9. PersonResource exécute la requête SQL via JDBC
-   
-   INSERT INTO persons (name, age) VALUES ('John', 30)
-   
+9. PersonResource ouvre un EntityManager, démarre une transaction et invoque `em.persist(person)`
+  ↓
+10. Hibernate synchronise l'entité avec MySQL (génération de l'ID)
    ↓
-10. MySQL insère la ligne et retourne l'ID auto-généré
+11. PersonResource valide la transaction et crée une Response 201 CREATED
     ↓
-11. PersonResource crée une Response avec statut 201 CREATED
-    ↓
-12. Jersey sérialise l'objet Person en JSON
+12. Jersey sérialise l'objet Person (désormais avec son ID) en JSON
     
     Response: 201 Created
-    Body: {"id":3,"name":"John","age":30}
+   Body: {"id":7,"name":"John","age":30}
     
     ↓
 13. personService.js reçoit la réponse et parse le JSON
@@ -470,7 +485,6 @@ Host: localhost:8080
 Content-Type: application/json
 
 {
-  "id": 3,
   "name": "Marie Dupont",
   "age": 28
 }
@@ -506,31 +520,38 @@ try {
 ```
 
 ```java
-// Backend
 @GET
 @Path("/{id}")
 public Response getPersonById(@PathParam("id") int id) {
-    // ...
-    if (rs.next()) {
-        return Response.ok(person).build(); // 200 OK
-    } else {
-        return Response.status(Response.Status.NOT_FOUND).build(); // 404
-    }
+  EntityManager em = JPAUtil.getEntityManager();
+  try {
+    Person person = em.find(Person.class, id);
+    return person != null
+      ? Response.ok(person).build()
+      : Response.status(Response.Status.NOT_FOUND).build();
+  } finally {
+    em.close();
+  }
 }
 ```
 
-#### Erreur SQL
+#### Erreur de persistance
 
 ```java
-// Backend
-try (Connection conn = DatabaseConnection.getConnection()) {
-    // ...
-} catch (SQLException e) {
-    e.printStackTrace();
-    throw new WebApplicationException(
-        "Database error: " + e.getMessage(), 
-        Response.Status.INTERNAL_SERVER_ERROR // 500
-    );
+EntityManager em = JPAUtil.getEntityManager();
+EntityTransaction tx = em.getTransaction();
+try {
+  tx.begin();
+  em.persist(person);
+  tx.commit();
+} catch (Exception e) {
+  if (tx.isActive()) tx.rollback();
+  throw new WebApplicationException(
+    "Persistence error: " + e.getMessage(),
+    Response.Status.INTERNAL_SERVER_ERROR
+  );
+} finally {
+  em.close();
 }
 ```
 
@@ -568,29 +589,18 @@ INSERT INTO persons (name, age) VALUES
 
 **a) Mettre à jour les identifiants MySQL**
 
-Éditer `src/main/java/com/example/db/DatabaseConnection.java` :
+Éditer `src/main/resources/META-INF/persistence.xml` et adapter les propriétés suivantes :
 
-```java
-private static final String USER = "root";        // Votre utilisateur MySQL
-private static final String PASSWORD = "1234";     // Votre mot de passe MySQL
+```xml
+<property name="javax.persistence.jdbc.url" value="jdbc:mysql://localhost:3306/person_db"/>
+<property name="javax.persistence.jdbc.user" value="root"/>
+<property name="javax.persistence.jdbc.password" value="1234"/>
 ```
 
-**b) Tester la connexion (optionnel)**
+**b) Vérifier la base (optionnel)**
 
-```powershell
-cd C:\Users\wmdai\eclipse-workspace\person-backend1
-$cp = "target\person-backend1\WEB-INF\lib\*;target\classes"
-javac -encoding UTF-8 -cp $cp -d target\classes src\main\java\com\example\db\DatabaseConnection.java
-java -cp "$cp;target\classes" com.example.db.DatabaseConnection
-```
-
-Devrait afficher :
-```
-✓ Connected to MySQL server
-✓ Database 'person_db' created/exists
-✓ Table 'persons' created/exists
-✓ Sample data inserted
-```
+- Laisser `hibernate.hbm2ddl.auto=update` pour que Hibernate crée/ajuste la table au démarrage.
+- Ou exécuter `database/schema.sql` manuellement si vous préférez un contrôle total du schéma.
 
 ### 3. Build du projet
 
@@ -661,12 +671,12 @@ http://localhost:8080/person-backend1/
 - Cliquer "Clear" pour revenir à la liste complète
 
 #### 3. **Ajouter** une personne
-- Remplir le formulaire (ID, Name, Age)
+- Remplir le formulaire (Name, Age)
 - Cliquer "Save"
 - Validation automatique :
-  - ID : Entier positif
   - Name : Minimum 2 caractères
   - Age : Entier ≥ 0
+- L'ID est généré automatiquement par MySQL/Hibernate
 
 #### 4. **Modifier** une personne
 - Cliquer sur "Edit" dans la ligne de la personne
@@ -692,20 +702,22 @@ person-backend1/
 │       │       └── example/
 │       │           ├── config/
 │       │           │   └── RestApplication.java       # Configuration JAX-RS
-│       │           ├── db/
-│       │           │   └── DatabaseConnection.java    # Gestion JDBC
 │       │           ├── filter/
 │       │           │   └── CORSFilter.java            # Filtre CORS
 │       │           ├── model/
 │       │           │   └── Person.java                # Modèle de données
 │       │           └── resource/
 │       │               └── PersonResource.java        # Endpoints REST
+│       │           └── util/
+│       │               └── JPAUtil.java               # Fabrique EntityManager
 │       └── webapp/
 │           ├── index.html                             # Page HTML (React)
 │           ├── bundle.js                              # JavaScript compilé
 │           ├── META-INF/
 │           └── WEB-INF/
 │               └── web.xml                            # Configuration Servlet
+│       └── resources/
+│           └── META-INF/persistence.xml               # Unité de persistance personPU
 │
 ├── frontend/                                          # Code source React
 │   ├── public/
@@ -797,21 +809,28 @@ HTTP/1.1 201 Created
 
 ### Backend
 
-✅ **PreparedStatement** : Protection contre les injections SQL
+✅ **Paramètres JPA nommés** : liaisons sécurisées via NamedQuery
 ```java
-String sql = "SELECT * FROM persons WHERE id = ?";
-PreparedStatement pstmt = conn.prepareStatement(sql);
-pstmt.setInt(1, id); // Paramètre sécurisé
+TypedQuery<Person> query = em.createNamedQuery("Person.searchByName", Person.class);
+query.setParameter("name", name.trim());
 ```
 
-✅ **Try-with-resources** : Fermeture automatique des connexions
+✅ **Transactions explicites** : rollback automatique en cas d'échec
 ```java
-try (Connection conn = DatabaseConnection.getConnection()) {
-    // Les ressources sont automatiquement fermées
+EntityTransaction tx = em.getTransaction();
+try {
+  tx.begin();
+  em.persist(person);
+  tx.commit();
+} catch (Exception e) {
+  if (tx.isActive()) tx.rollback();
+  throw e;
 }
 ```
 
-✅ **Gestion des erreurs** : Codes HTTP appropriés (200, 201, 404, 500)
+✅ **Fermeture garantie des EntityManager** (`try/finally`)
+
+✅ **Gestion des erreurs** : codes HTTP cohérents (200, 201, 404, 500)
 
 ✅ **CORS configuré** : Permet les requêtes cross-origin en développement
 
@@ -842,12 +861,12 @@ Invoke-RestMethod -Uri "http://localhost:8080/person-backend1/api/persons/1"
 Invoke-RestMethod -Uri "http://localhost:8080/person-backend1/api/persons/search?name=Ahmed"
 
 # POST (add)
-$person = @{ id = 4; name = "Jean"; age = 35 } | ConvertTo-Json
+$person = @{ name = "Jean"; age = 35 } | ConvertTo-Json
 Invoke-RestMethod -Method Post -Uri "http://localhost:8080/person-backend1/api/persons" `
   -ContentType "application/json" -Body $person
 
 # PUT (update)
-$person = @{ id = 4; name = "Jean Martin"; age = 36 } | ConvertTo-Json
+$person = @{ name = "Jean Martin"; age = 36 } | ConvertTo-Json
 Invoke-RestMethod -Method Put -Uri "http://localhost:8080/person-backend1/api/persons/4" `
   -ContentType "application/json" -Body $person
 

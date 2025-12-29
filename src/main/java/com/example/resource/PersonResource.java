@@ -1,178 +1,155 @@
 package com.example.resource;
 
-import java.sql.*;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-import javax.ws.rs.*;
+import javax.annotation.PreDestroy;
+import javax.inject.Singleton;
+import javax.persistence.EntityManager;
+import javax.persistence.EntityTransaction;
+import javax.persistence.TypedQuery;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.DELETE;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-import com.example.db.DatabaseConnection;
 import com.example.model.Person;
+import com.example.util.JPAUtil;
 
 @Path("/persons")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Singleton
 public class PersonResource {
 
-    // GET all persons
-    @GET
-    public List<Person> getAllPersons() {
-        List<Person> persons = new ArrayList<>();
-        String sql = "SELECT id, name, age FROM persons";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            
-            while (rs.next()) {
-                Person p = new Person(
-                    rs.getInt("id"),
-                    rs.getString("name"),
-                    rs.getInt("age")
-                );
-                persons.add(p);
-            }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
-                Response.Status.INTERNAL_SERVER_ERROR);
-        }
-        return persons;
+    private static final Logger LOGGER = Logger.getLogger(PersonResource.class.getName());
+
+    @PreDestroy
+    public void shutdown() {
+        JPAUtil.close();
     }
 
-    // GET person by ID
+    @GET
+    public List<Person> getAllPersons() {
+        EntityManager em = JPAUtil.getEntityManager();
+        try {
+            return em.createNamedQuery("Person.findAll", Person.class).getResultList();
+        } finally {
+            em.close();
+        }
+    }
+
     @GET
     @Path("/{id}")
     public Response getPersonById(@PathParam("id") int id) {
-        String sql = "SELECT id, name, age FROM persons WHERE id = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            pstmt.setInt(1, id);
-            ResultSet rs = pstmt.executeQuery();
-            
-            if (rs.next()) {
-                Person p = new Person(
-                    rs.getInt("id"),
-                    rs.getString("name"),
-                    rs.getInt("age")
-                );
-                return Response.ok(p).build();
-            } else {
+        EntityManager em = JPAUtil.getEntityManager();
+        try {
+            Person person = em.find(Person.class, id);
+            if (person == null) {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
-                Response.Status.INTERNAL_SERVER_ERROR);
+            return Response.ok(person).build();
+        } finally {
+            em.close();
         }
     }
 
-    // GET person by name (search)
     @GET
     @Path("/search")
     public List<Person> getPersonByName(@QueryParam("name") String name) {
-        List<Person> persons = new ArrayList<>();
-        String sql = "SELECT id, name, age FROM persons WHERE name LIKE ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            pstmt.setString(1, "%" + name + "%");
-            ResultSet rs = pstmt.executeQuery();
-            
-            while (rs.next()) {
-                Person p = new Person(
-                    rs.getInt("id"),
-                    rs.getString("name"),
-                    rs.getInt("age")
-                );
-                persons.add(p);
+        EntityManager em = JPAUtil.getEntityManager();
+        try {
+            if (name == null || name.trim().isEmpty()) {
+                return em.createNamedQuery("Person.findAll", Person.class).getResultList();
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
-                Response.Status.INTERNAL_SERVER_ERROR);
+            TypedQuery<Person> query = em.createNamedQuery("Person.searchByName", Person.class);
+            query.setParameter("name", name.trim());
+            return query.getResultList();
+        } finally {
+            em.close();
         }
-        return persons;
     }
 
-    // POST - add person
     @POST
     public Response addPerson(Person person) {
-        String sql = "INSERT INTO persons (name, age) VALUES (?, ?)";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-            
-            pstmt.setString(1, person.getName());
-            pstmt.setInt(2, person.getAge());
-            pstmt.executeUpdate();
-            
-            ResultSet rs = pstmt.getGeneratedKeys();
-            if (rs.next()) {
-                person.setId(rs.getInt(1));
-            }
-            
+        EntityManager em = JPAUtil.getEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            tx.begin();
+            em.persist(person);
+            tx.commit();
             return Response.status(Response.Status.CREATED).entity(person).build();
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to create person", e);
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw new WebApplicationException("Persistence error: " + e.getMessage(),
                 Response.Status.INTERNAL_SERVER_ERROR);
+        } finally {
+            em.close();
         }
     }
 
-    // PUT - update person
     @PUT
     @Path("/{id}")
     public Response updatePerson(@PathParam("id") int id, Person person) {
-        String sql = "UPDATE persons SET name = ?, age = ? WHERE id = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            pstmt.setString(1, person.getName());
-            pstmt.setInt(2, person.getAge());
-            pstmt.setInt(3, id);
-            
-            int rowsAffected = pstmt.executeUpdate();
-            if (rowsAffected > 0) {
-                person.setId(id);
-                return Response.ok(person).build();
-            } else {
+        EntityManager em = JPAUtil.getEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            Person existing = em.find(Person.class, id);
+            if (existing == null) {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
+            tx.begin();
+            existing.setName(person.getName());
+            existing.setAge(person.getAge());
+            tx.commit();
+            return Response.ok(existing).build();
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to update person with id " + id, e);
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw new WebApplicationException("Persistence error: " + e.getMessage(),
                 Response.Status.INTERNAL_SERVER_ERROR);
+        } finally {
+            em.close();
         }
     }
 
-    // DELETE - remove person
     @DELETE
     @Path("/{id}")
     public Response deletePerson(@PathParam("id") int id) {
-        String sql = "DELETE FROM persons WHERE id = ?";
-        
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            
-            pstmt.setInt(1, id);
-            int rowsAffected = pstmt.executeUpdate();
-            
-            if (rowsAffected > 0) {
-                return Response.noContent().build();
-            } else {
+        EntityManager em = JPAUtil.getEntityManager();
+        EntityTransaction tx = em.getTransaction();
+        try {
+            Person existing = em.find(Person.class, id);
+            if (existing == null) {
                 return Response.status(Response.Status.NOT_FOUND).build();
             }
-        } catch (SQLException e) {
-            e.printStackTrace();
-            throw new WebApplicationException("Database error: " + e.getMessage(), 
+            tx.begin();
+            em.remove(existing);
+            tx.commit();
+            return Response.noContent().build();
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to delete person with id " + id, e);
+            if (tx.isActive()) {
+                tx.rollback();
+            }
+            throw new WebApplicationException("Persistence error: " + e.getMessage(),
                 Response.Status.INTERNAL_SERVER_ERROR);
+        } finally {
+            em.close();
         }
     }
 }
